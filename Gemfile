@@ -3,6 +3,8 @@ ruby '2.2.0'
 #ruby-gemset=railstutorial_rails_4_0
 
 gem 'rails', '4.2.0'
+gem 'bootstrap-sass'
+gem 'autoprefixer-rails'
 
 group :development, :test do
 	gem 'sqlite3'
