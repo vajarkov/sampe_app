@@ -5,6 +5,7 @@ ruby '2.2.0'
 gem 'rails', '4.2.0'
 gem 'bootstrap-sass'
 gem 'autoprefixer-rails'
+gem 'bcrypt-ruby'
 
 group :development, :test do
 	gem 'sqlite3'
