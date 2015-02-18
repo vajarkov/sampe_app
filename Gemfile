@@ -13,6 +13,7 @@ gem 'bootstrap-will_paginate'
 group :development, :test do
 	gem 'sqlite3'
 	gem 'rspec-rails'
+	gem 'rspec-its'
 end
 
 group :test do
