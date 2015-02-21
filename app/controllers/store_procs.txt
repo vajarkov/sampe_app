@@ -1,0 +1,167 @@
+ALTER PROC [dbo].[pmcp_p2_BG_GetNextWfBackgroundChecks] 
+@ProducerID INT,
+@WorkflowID INT,
+@WorkflowModuleID INT,
+@InitiatedUserID INT,
+@WorkFLowInstanceID INT,
+@ApplicationUserID UNIQUEIDENTIFIER
+AS
+DECLARE @PrincipleID INT, @ModuleID INT
+
+SELECT @PrincipleID = PrincipleID FROM dbo.Producers p WHERE p.ProducerID = @ProducerID
+
+
+IF ISNULL(@PrincipleID,0)=0
+BEGIN
+
+	IF EXISTS(SELECT * FROM p2_BG_eVerifileTransactionLog L WHERE L.ProducerID = @ProducerID AND eVerifileResult IS NOT NULL)
+	BEGIN
+		DECLARE @ETT2 ExceptionTableType2		
+		
+		INSERT INTO @ETT2(ExceptionParameter, ExceptionValue, SecondaryParameter, SecondaryValue)
+		SELECT 'eVerifileResult', eVerifileResult, NULL, NULL
+		
+		FROM p2_BG_eVerifileTransactionLog L WHERE L.ProducerID = 1010010 AND eVerifileResult IS NOT NULL
+		
+		EXEC pmcp_p2_wf_GetNextWFStep2 
+				@WorkFlowID,
+				@ProducerID,
+				@WorkFlowModuleID,	
+				@InitiatedUserID,
+				@ETT2,
+				@ApplicationUserID
+	END
+END
+ELSE
+
+BEGIN
+
+	IF	EXISTS(SELECT * FROM p2_BG_eVerifileTransactionLog WHERE eVerifileResult IS NOT NULL AND ProducerID = @ProducerID) AND
+		EXISTS(SELECT * FROM p2_BG_eVerifileTransactionLog WHERE DocumentID IS NOT NULL AND ProducerID = @PrincipleID)
+		BEGIN
+			SELECT @ModuleID = WFM.ModuleID FROM Wf_WorkFlowModules WFM WHERE Wfm.WorkFlowModuleID = @WorkflowModuleID
+			EXEC pmcp_p2_Wf_ChangeModuleAssignment
+				@ProducerID,
+				@WorkflowInstanceID,
+				@ModuleID,
+				@ApplicationUserID
+		END
+END
+
+
+
+
+*******************************************
+
+USE [PMCPDev]
+GO
+/****** Object:  StoredProcedure [dbo].[pmcp_p2_BG_GetBackgroundinfoForProducer]    Script Date: 2/17/2015 5:03:15 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+
+-- =============================================
+-- Author:                Bhesh Raj Tripathi
+-- Create date: 02/16/2015
+-- Description:    Get Background Check info For Producer to send to the eVerifile API
+-- =============================================
+
+ALTER PROCEDURE [dbo].[pmcp_p2_BG_GetBackgroundinfoForProducer]
+@ProducerID int
+
+AS 
+
+   DECLARE @PrincipleID INT ,
+           @United_States NVARCHAR(20) = 'united_states'
+
+		   SELECT @PrincipleID=PrincipleID FROM producers WHERE ProducerID=@ProducerID
+
+   IF @PrincipleID=0
+   BEGIN 
+   
+  SELECT p.FirstName,p.LastName,p.BusinessName,pa.Address1,pa.Address2,s.eVerifileStateCode,pa.Zip,pa.City,@United_States AS Country,
+  p.PreferredContactPhone AS PrimaryTelephoneNumber,p.EmailAddress,p.TaxIDSSN AS GovermentID,vtl.eVerifileTransactionID AS ReferenceNumber,
+  CASE WHEN pet.EntityTypeID=1300000 THEN '1' ELSE '0' END AS IsBusiness
+  FROM producers p INNER JOIN dbo.ProducerAddresses pa ON pa.ProducerID = p.ProducerID
+                   INNER JOIN (SELECT TOP 1 producerId,eVerifileTransactionID FROM  dbo.p2_BG_eVerifileTransactionLog WHERE ProducerID=@ProducerID ) vtl  ON vtl.ProducerID = p.ProducerID
+				   INNER JOIN states s ON s.StateID = pa.StateiD
+				   INNER JOIN dbo.ProducerEntityTypes pet ON pet.ProducerEntityTypeID = p.ProducerEntityTypeID
+WHERE p.ProducerID=@ProducerID AND pa.ProducerAddressTypeID=1570000
+
+END
+  ELSE 
+     BEGIN
+        
+  SELECT p.FirstName,p.LastName,p.BusinessName,pa.Address1,pa.Address2,s.eVerifileStateCode,pa.Zip,pa.City,@United_States AS Country,
+  p.PreferredContactPhone AS PrimaryTelephoneNumber,p.EmailAddress,p.TaxIDSSN AS GovermentID,vtl.eVerifileTransactionID AS ReferenceNumber,
+  CASE WHEN pet.EntityTypeID=1300000 THEN '1' ELSE '0' END AS IsBusiness
+  FROM producers p INNER JOIN dbo.ProducerAddresses pa ON pa.ProducerID = p.ProducerID
+                   INNER JOIN  dbo.p2_BG_eVerifileTransactionLog  vtl ON vtl.ProducerID = p.ProducerID 
+				   INNER JOIN states s ON s.StateID = pa.StateiD
+				   INNER JOIN dbo.ProducerEntityTypes pet ON pet.ProducerEntityTypeID = p.ProducerEntityTypeID
+WHERE p.ProducerID IN(@ProducerID,@PrincipleID) AND pa.ProducerAddressTypeID=1570000
+END
+
+
+********************
+USE [PMCPDev]
+GO
+/****** Object:  StoredProcedure [dbo].[pmcp_p2_BG_InserteVerifileTransaction]    Script Date: 2/17/2015 5:03:37 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+
+-- =============================================
+-- Author:                Bhesh Raj Tripathi
+-- Create date: 02/16/2015
+-- Description:     Insert eVerifile Transaction
+-- =============================================
+
+ALTER PROCEDURE [dbo].[pmcp_p2_BG_InserteVerifileTransaction]
+@ProducerID INT,
+ @ApplicationUser UniqueIdentifier = NULL
+
+AS 
+
+
+IF @ApplicationUser IS NOT NULL
+BEGIN
+
+DECLARE @ci VARBINARY(128)
+      SET @ci =  cast(cast(LEFT( OBJECT_NAME(@@PROCID),90) as varchar(90)) + ';' + cast(@ApplicationUser as varchar(38)) + space(128) as binary(128))               
+SET CONTEXT_INFO @ci
+END
+
+
+
+  DECLARE @PrincipleID INT,
+          @eVerifileBusinessTransactionID INT,
+          @eVerifileAgentTransactionID INT
+          
+          SET @PrincipleID = (SELECT PrincipleID FROM Producers WHERE ProducerID = @ProducerID)
+          
+          SET @eVerifileAgentTransactionID=(SELECT eVerifileTransactionID AS AgentTransactionID FROM dbo.p2_BG_eVerifileTransactionLog WHERE producerID=@PrincipleID)
+           SET @eVerifileBusinessTransactionID=(SELECT eVerifileTransactionID  AS BusinessTransactionID FROM dbo.p2_BG_eVerifileTransactionLog WHERE producerID=@ProducerID)
+  
+   IF @PrincipleID=0
+   BEGIN
+   
+          INSERT INTO dbo.p2_BG_eVerifileTransactionLog(ProducerID,TransactionSubmitDate) VALUES(@ProducerID,GETDATE())
+		 SET @eVerifileBusinessTransactionID=(SELECT MAX(eVerifileTransactionID)  AS BusinessTransactionID FROM dbo.p2_BG_eVerifileTransactionLog WHERE producerID=@ProducerID)
+		     
+		     SELECT @eVerifileBusinessTransactionID AS AgentTransactionID,NULL AS BusinessTransactionID 
+		     
+		 End
+          ELSE 
+		  BEGIN 
+		      INSERT INTO dbo.p2_BG_eVerifileTransactionLog ( ProducerID,TransactionSubmitDate) VALUES(@ProducerID,GETDATE())
+			  INSERT INTO dbo.p2_BG_eVerifileTransactionLog ( ProducerID,TransactionSubmitDate) VALUES(@PrincipleID,GETDATE())
+			  
+			  SET @eVerifileAgentTransactionID=(SELECT MAX(eVerifileTransactionID) AS AgentTransactionID FROM dbo.p2_BG_eVerifileTransactionLog WHERE producerID=@PrincipleID)
+           SET @eVerifileBusinessTransactionID=(SELECT MAX(eVerifileTransactionID)  AS BusinessTransactionID FROM dbo.p2_BG_eVerifileTransactionLog WHERE producerID=@ProducerID)
+  
+			   END 
+			   
+		SELECT @eVerifileAgentTransactionID AS AgentTransactionID,@eVerifileBusinessTransactionID AS BusinessTransactionID
